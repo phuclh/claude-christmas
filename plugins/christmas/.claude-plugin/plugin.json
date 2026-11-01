@@ -1,6 +1,6 @@
 {
   "name": "christmas",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Christmas theme for Claude Code: a garland of bells, bows and twinkling lights around the prompt (hover a bell to hear a carol), snow falling over the conversation, festive spinner words, and optional Santa and sleigh-bell sounds",
   "author": { "name": "LE PHUC H" },
   "homepage": "https://github.com/phuclh/claude-christmas",

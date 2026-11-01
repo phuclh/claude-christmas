@@ -305,7 +305,7 @@ async function withSnow($: EngineInterface, e: TranscriptSite, row: RenderElemen
 
   const { Box, Text } = $.ui.resolve(e)
   const { columns, rows: screenRows } = e.viewport
-  const skyRows = Math.max(1, screenRows - PROMPT_AREA_ROWS - (await read($, draftRows)))
+  const skyRows = Math.max(1, screenRows - PROMPT_AREA_ROWS - rowsOfDraft(draftText, promptColumns))
   const shownRows = Math.min(skyRows, conversationRowsOnScreen())
   const skyTop = onScreen.last + 1 - skyRows
   const tick = await read($, snowTick)
@@ -679,6 +679,7 @@ async function setTheme($: EngineInterface, isOn: boolean): Promise<void> {
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
+    draftText = ''
     await $.command.register({
       name: 'christmas',
       description:
@@ -830,12 +831,12 @@ export const register: Register = on => {
 
     const { columns } = e.viewport
 
-    if (columns !== promptColumns) {
-      promptColumns = columns
-      await fitDraft($)
-    }
-
-    const rows = await read($, draftRows)
+    promptColumns = columns
+    // Read for the redraw a new row count brings, but counted here at this
+    // width: a resize wraps the draft again with no edit, and a drawing may
+    // not write state.
+    await read($, draftRows)
+    const rows = rowsOfDraft(draftText, columns)
     const tick = await read($, frameTick)
     const hasSleigh = await read($, isAwake)
     const elements = $.ui.resolve(e)
