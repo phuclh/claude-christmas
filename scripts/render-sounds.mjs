@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 /**
- * Renders the Christmas mod's sounds into plugins/christmas/sounds: the carols
- * the bells ring, Santa's laughs and the chimes Enter plays, and the sleigh-bell
- * tinkles of typing.
+ * Renders the Christmas mod's synthesized sounds into plugins/christmas/sounds:
+ * the carols the bells ring, and the chime, church bells and New Year tune
+ * Enter plays. (The typing jingles, Santa's laughs and the sleigh-bell shakes
+ * were made with ElevenLabs and are not rendered here.)
  *
- * Everything is synthesized here from sines, FM and filtered noise: a
- * glockenspiel carries each tune, a soft bass and chords sit under it, a
- * formant synthesizer laughs Santa's "Ho! ho! ho!", and a small Freeverb gives
- * it all a room. Nothing is recorded or sampled; the tunes are traditional
- * carols in the public domain.
+ * Everything here is synthesized from sines, FM and filtered noise: a
+ * glockenspiel carries each tune, a soft bass and chords sit under it, and a
+ * small Freeverb gives it all a room. The tunes are traditional carols in the
+ * public domain.
  *
  *   node scripts/render-sounds.mjs
  */
@@ -196,196 +196,6 @@ function sleighShake(seed, seconds, { density = 90, swell = 0.4 } = {}) {
 
   return out
 }
-
-/* ------------------------------------------------------------ Santa's voice */
-
-/** A curve's value at `time`: straight lines between its `[time, value]` points, flat past its ends. */
-function along(curve, time) {
-  const [firstTime, firstValue] = curve[0] ?? [0, 0]
-
-  if (time <= firstTime) {
-    return firstValue
-  }
-
-  for (let index = 1; index < curve.length; index++) {
-    const [endTime, endValue] = curve[index]
-
-    if (time <= endTime) {
-      const [startTime, startValue] = curve[index - 1]
-
-      return startValue + ((endValue - startValue) * (time - startTime)) / Math.max(endTime - startTime, 1e-9)
-    }
-  }
-
-  return curve[curve.length - 1]?.[1] ?? 0
-}
-
-/** A second-order filter from the Audio EQ Cookbook. */
-function biquad(kind, frequency, q = Math.SQRT1_2) {
-  const angle = (TAU * frequency) / SAMPLE_RATE
-  const alpha = Math.sin(angle) / (2 * q)
-  const cos = Math.cos(angle)
-  const [b0, b1, b2] = kind === 'lowpass' ? [(1 - cos) / 2, 1 - cos, (1 - cos) / 2] : [(1 + cos) / 2, -(1 + cos), (1 + cos) / 2]
-  const [a0, a1, a2] = [1 + alpha, -2 * cos, 1 - alpha]
-  let [x1, x2, y1, y2] = [0, 0, 0, 0]
-
-  return x => {
-    const y = (b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2) / a0
-    ;[x2, x1, y2, y1] = [x1, x, y1, y]
-
-    return y
-  }
-}
-
-const BREATH_LEVEL = 0.35
-const OPEN_QUOTIENT = 0.6
-
-/**
- * The source of a voiced sound: the slope of the air through the vocal folds
- * as they open, then snap shut (Klatt's KLGLOTT88 pulse).
- */
-function glottalSlope(phase) {
-  if (phase >= OPEN_QUOTIENT) {
-    return 0
-  }
-
-  const opened = phase / OPEN_QUOTIENT
-
-  return 2 * opened - 3 * opened * opened
-}
-
-/** One formant of the vocal tract: a two-pole resonance free to glide (Klatt's resonator). */
-function resonator() {
-  let [y1, y2] = [0, 0]
-
-  return (x, frequency, bandwidth) => {
-    const radius = Math.exp((-Math.PI * bandwidth) / SAMPLE_RATE)
-    const c = -radius * radius
-    const b = 2 * radius * Math.cos((TAU * frequency) / SAMPLE_RATE)
-    const y = (1 - b - c) * x + b * y1 + c * y2
-    ;[y2, y1] = [y1, y]
-
-    return y
-  }
-}
-
-/**
- * Sings a voice through a cascade of five formants, as Klatt's synthesizer
- * does: the glottal pulse and a breath of air, shaped by the vowel's formants.
- */
-function sing(voice) {
-  const random = randomFrom(voice.seed)
-  const sung = buffer(voice.seconds)
-  const tract = Array.from({ length: 5 }, resonator)
-  const softened = biquad('lowpass', 4000)
-  let phase = 0
-  let cycle = 0
-  let stretch = 1
-  let cycleGain = 1
-
-  for (let index = 0; index < sung.length; index++) {
-    const time = index / SAMPLE_RATE
-    const wobble = 1 + along(voice.vibrato.depth, time) * Math.sin(TAU * voice.vibrato.rate * time)
-    phase += (along(voice.pitch, time) * wobble * stretch) / SAMPLE_RATE
-
-    if (phase >= 1) {
-      phase -= 1
-      cycle++
-      stretch = 1 + (random() * 2 - 1) * voice.jitter
-      cycleGain = (cycle % 2 === 0 ? 1 : 1 - voice.growl) * (0.9 + random() * 0.1)
-    }
-
-    const voiced = softened(glottalSlope(phase) * cycleGain * along(voice.voicing, time))
-    const breath = (random() * 2 - 1) * along(voice.breath, time) * BREATH_LEVEL
-    const frequencies = [...voice.formants.map(curve => along(curve, time)), ...voice.upperFormants]
-    let sample = voiced + breath
-
-    tract.forEach((formant, number) => {
-      sample = formant(sample, frequencies[number], voice.bandwidths[number])
-    })
-
-    sung[index] = sample
-  }
-
-  const highpass = biquad('highpass', 60)
-
-  return sung.map(sample => highpass(sample))
-}
-
-/**
- * Santa's "Ho! ho! ho!": each ho a breath of "h" opening into a round "o"
- * that closes toward "oo", each a little lower than the last, the last one
- * held and falling away.
- *
- * `depth` lowers the pitch and lengthens the vocal tract, `tempo` stretches
- * the time, `hos` is how many he laughs, `growl` the rumble of a big belly.
- */
-function hohoho({ depth = 1, tempo = 1, hos = 3, growl = 0.15, seed = 1 }) {
-  const at = seconds => seconds * tempo
-  const hertz = pitch => pitch * depth
-  const tract = frequency => frequency * (0.8 + 0.2 * depth)
-  const syllables = Array.from({ length: hos }, (_, beat) => {
-    const isLast = beat === hos - 1
-    const top = 150 - beat * 9
-
-    return {
-      at: at(0.02 + beat * 0.34),
-      breath: at(0.075),
-      vowel: at(isLast ? 0.44 : 0.2),
-      pitch: isLast ? [hertz(top), hertz(top - 5), hertz(top - 22), hertz(top - 42)] : [hertz(top), hertz(top - 18)],
-      loudness: isLast ? 1 : 0.95 - beat * 0.03,
-    }
-  })
-  const pitch = []
-  const voicing = []
-  const breath = []
-  const formants = [[], [], []]
-
-  for (const syllable of syllables) {
-    const onset = syllable.at + syllable.breath
-    const end = onset + syllable.vowel
-    const { loudness } = syllable
-
-    breath.push(
-      [syllable.at, 0],
-      [syllable.at + syllable.breath * 0.6, 0.55 * loudness],
-      [onset, 0.4 * loudness],
-      [onset + 0.02, 0.12 * loudness],
-      [end - 0.01, 0.12 * loudness],
-      [end + 0.005, 0],
-    )
-    voicing.push(
-      [onset - 0.004, 0],
-      [onset + 0.014, loudness],
-      [onset + syllable.vowel * 0.45, 0.8 * loudness],
-      [end - syllable.vowel * 0.15, 0.3 * loudness],
-      [end, 0],
-    )
-    syllable.pitch.forEach((hz, index) => pitch.push([onset + (syllable.vowel * index) / (syllable.pitch.length - 1), hz]))
-    formants[0].push([syllable.at, tract(570)], [onset, tract(540)], [end, tract(410)])
-    formants[1].push([syllable.at, tract(960)], [onset, tract(900)], [end, tract(760)])
-    formants[2].push([syllable.at, tract(2500)], [end, tract(2350)])
-  }
-
-  const last = syllables[syllables.length - 1]
-  const lastOnset = last.at + last.breath
-
-  return sing({
-    seconds: lastOnset + last.vowel + 0.08,
-    pitch,
-    voicing,
-    breath,
-    formants,
-    upperFormants: [tract(3300), tract(3800)],
-    bandwidths: [80, 100, 150, 250, 220],
-    vibrato: { rate: 5, depth: [[0, 0], [lastOnset + 0.1, 0], [lastOnset + 0.3, 0.03]] },
-    jitter: 0.018,
-    growl,
-    seed,
-  })
-}
-
-const SANTA_ROOM = { room: 0.75, damping: 0.45, wet: 0.18, tail: 0.6 }
 
 /* --------------------------------------------------------------- finishing */
 
@@ -685,29 +495,6 @@ function sequence(notes, { step, gain = 0.6, brightness = 1, length = 2 }) {
 }
 
 const ENTER = {
-  // Santa, jolly.
-  'santa-jolly': () => finished(withReverb(hohoho({ depth: 0.9, tempo: 0.92, growl: 0.1, seed: 51 }), SANTA_ROOM), 0.62),
-  // Santa, deep and slow.
-  'santa-deep': () => finished(withReverb(hohoho({ depth: 0.72, tempo: 1.15, growl: 0.25, seed: 52 }), SANTA_ROOM), 0.66),
-  // Santa's belly laugh: four hos and a rumble.
-  'santa-belly': () => finished(withReverb(hohoho({ depth: 0.8, hos: 4, growl: 0.3, seed: 53 }), SANTA_ROOM), 0.64),
-  // Santa arriving on his sleigh.
-  'santa-bells': () => {
-    const laugh = hohoho({ depth: 0.85, growl: 0.15, seed: 54 })
-    const out = buffer(laugh.length / SAMPLE_RATE + 0.3)
-    mixInto(out, sleighShake(55, laugh.length / SAMPLE_RATE + 0.2, { density: 80, swell: 0.8 }), 0, 0.22)
-    mixInto(out, laugh, 0.05)
-
-    return finished(withReverb(out, SANTA_ROOM), 0.64)
-  },
-  // A strap of sleigh bells shaken in two strokes.
-  sleigh: () => {
-    const out = buffer(1.6)
-    mixInto(out, sleighShake(11, 0.45, { density: 120 }), 0)
-    mixInto(out, sleighShake(12, 0.7, { density: 110 }), 0.5, 0.9)
-
-    return finished(withReverb(out, { wet: 0.22, tail: 0.8 }), 0.55)
-  },
   // A rising arpeggio on the glockenspiel.
   chime: () => finished(withReverb(sequence(['C6', 'E6', 'G6', 'C7'], { step: 0.09 }), { wet: 0.3 }), 0.55),
   // Two church bells, high then low.
@@ -744,20 +531,6 @@ const ENTER = {
   },
 }
 
-/* ------------------------------------------------------------- keystrokes */
-
-const KEYS = {
-  'jingle-1': () => finished(jingle(101), 0.32),
-  'jingle-2': () => finished(jingle(202, { brightness: 0.9 }), 0.32),
-  'jingle-3': () => finished(jingle(303, { brightness: 1.1 }), 0.3),
-  'jingle-4': () => finished(jingle(404, { brightness: 0.85 }), 0.32),
-  'twinkle-c': () => finished(glock(hertzOf('C7'), { length: 0.9, brightness: 0.7 }), 0.3),
-  'twinkle-d': () => finished(glock(hertzOf('D7'), { length: 0.9, brightness: 0.7 }), 0.3),
-  'twinkle-e': () => finished(glock(hertzOf('E7'), { length: 0.9, brightness: 0.7 }), 0.3),
-  'twinkle-g': () => finished(glock(hertzOf('G6'), { length: 0.9, brightness: 0.7 }), 0.3),
-  'twinkle-a': () => finished(glock(hertzOf('A6'), { length: 0.9, brightness: 0.7 }), 0.3),
-}
-
 /* -------------------------------------------------------------------- run */
 
 function write(path, signal) {
@@ -775,6 +548,3 @@ for (const [name, render] of Object.entries(ENTER)) {
   write(`${name}.wav`, render())
 }
 
-for (const [name, render] of Object.entries(KEYS)) {
-  write(`${name}.wav`, render())
-}

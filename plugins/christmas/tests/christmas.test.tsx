@@ -7,13 +7,13 @@ import { isUnderSnow } from '../hooks/selection'
 import { FLAKES, flakeAt, snowAt, snowfallSize } from '../hooks/snow'
 import {
   createDeck,
+  createEnterDeck,
   ENTER_CLIPS,
   JINGLE_CLIPS,
   KEYSTROKE_GAP_MS,
   keystrokeClip,
   SANTA_CLIPS,
   SONGS,
-  TWINKLE_CLIPS,
 } from '../hooks/sounds'
 
 const FULLSCREEN = { columns: 100, rows: 30, isFullscreen: true }
@@ -218,11 +218,15 @@ test('a selection with snow over it reads as the same selection', async () => {
   expect(isUnderSnow('hello world', 'goodbye ❆', FLAKES)).toBe(false)
 })
 
-test('typing jingles sleigh bells or plays a note, never faster than the gap', async () => {
+test('typing jingles one of many sleigh bells, never faster than the gap', async () => {
   const edit = { start: 0, end: 0, inputText: 'a' }
   expect(keystrokeClip(edit, KEYSTROKE_GAP_MS - 1)).toBeUndefined()
   expect(keystrokeClip({ start: 3, end: 3, inputText: '' }, 1_000)).toBeUndefined()
-  expect([...JINGLE_CLIPS, ...TWINKLE_CLIPS]).toContain(keystrokeClip(edit, 1_000))
+  expect(JINGLE_CLIPS).toContain(keystrokeClip(edit, 1_000))
+
+  const random = seededRandom(3)
+  const heard = new Set(Array.from({ length: 300 }, () => keystrokeClip(edit, 1_000, random)))
+  expect(heard.size).toBeGreaterThan(40)
 
   const deal = createDeck(ENTER_CLIPS, seededRandom(5))
   const round = Array.from({ length: ENTER_CLIPS.length }, () => deal())
@@ -381,13 +385,17 @@ test('/christmas sounds greets with a ho ho ho', async ($, on) => {
   expect(off.text).toMatch(/off/)
 })
 
-test('a round of Enter sounds holds every Santa laugh', async () => {
-  const deal = createDeck(ENTER_CLIPS, seededRandom(9))
-  const round = Array.from({ length: ENTER_CLIPS.length }, () => deal())
+test('Enter laughs like Santa most, every laugh in turn, and every other sound comes round', async () => {
+  const deal = createEnterDeck(seededRandom(9))
+  const played = Array.from({ length: 7 * SANTA_CLIPS.length }, () => deal())
+  const santa = new Set<string>(SANTA_CLIPS)
+  const laughs = played.filter(clip => santa.has(clip))
 
-  for (const laugh of SANTA_CLIPS) {
-    expect(round).toContain(laugh)
-  }
+  expect(laughs).toHaveLength(3 * SANTA_CLIPS.length)
+  expect(new Set(laughs.slice(0, SANTA_CLIPS.length)).size).toBe(SANTA_CLIPS.length)
+  expect(new Set(played)).toEqual(new Set(ENTER_CLIPS))
+  expect(played.filter(clip => clip === 'sounds/ding-dong.wav')).toHaveLength(SANTA_CLIPS.length)
+  expect(played.some((clip, index) => clip === played[index - 1])).toBe(false)
 })
 
 test('with sounds on, Enter plays a sound, but not over a carol', async ($, on) => {

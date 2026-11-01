@@ -1,12 +1,12 @@
 /**
  * The theme's sounds. Each bell on the garland rings a carol when the pointer
- * reaches it. With sounds on, typing tinkles a sleigh bell or, now and then, a
- * glockenspiel note, and sending a prompt gets Santa's "Ho! ho! ho!", sleigh
- * bells or a chime.
+ * reaches it. With sounds on, typing jingles a sleigh bell, and sending a
+ * prompt gets Santa's "Ho! ho! ho!", sleigh bells, church bells or a chime.
  *
- * The clips are the mod's own files under sounds/, synthesized from sines, FM
- * and noise by the repository's scripts/render-sounds.mjs; the carols are
- * traditional tunes in the public domain.
+ * The clips are the mod's own files under sounds/. The carols and chimes are
+ * synthesized by the repository's scripts/render-sounds.mjs, and the carols
+ * are traditional tunes in the public domain; the typing jingles, Santa's
+ * laughs and the sleigh bells were made with ElevenLabs.
  */
 
 export type Song = { title: string; asset: string }
@@ -22,33 +22,55 @@ export const SONGS: readonly Song[] = [
   { title: 'Hark! The Herald Angels Sing', asset: 'sounds/songs/hark-the-herald.wav' },
 ]
 
-export const JINGLE_CLIPS = ['sounds/jingle-1.wav', 'sounds/jingle-2.wav', 'sounds/jingle-3.wav', 'sounds/jingle-4.wav'] as const
-export const TWINKLE_CLIPS = [
-  'sounds/twinkle-c.wav',
-  'sounds/twinkle-d.wav',
-  'sounds/twinkle-e.wav',
-  'sounds/twinkle-g.wav',
-  'sounds/twinkle-a.wav',
-] as const
+/** Sleigh-bell jingles for typing, one at random per keystroke. */
+export const JINGLE_CLIPS: readonly string[] = Array.from(
+  { length: 52 },
+  (_, index) => `sounds/keys/jingle-${String(index + 1).padStart(2, '0')}.wav`,
+)
+
+/**
+ * Santa's laughs, some with a "Merry Christmas!": twelve as sound effects and
+ * four spoken. The first greets `/christmas sounds`.
+ */
 export const SANTA_CLIPS = [
-  'sounds/santa-jolly.wav',
-  'sounds/santa-deep.wav',
-  'sounds/santa-belly.wav',
-  'sounds/santa-bells.wav',
+  'sounds/santa/santa-merry-1.wav',
+  'sounds/santa/santa-hearty-1.wav',
+  'sounds/santa/santa-belly-1.wav',
+  'sounds/santa/santa-bells-1.wav',
+  'sounds/santa/santa-bill-1.wav',
+  'sounds/santa/santa-merry-2.wav',
+  'sounds/santa/santa-hearty-2.wav',
+  'sounds/santa/santa-belly-2.wav',
+  'sounds/santa/santa-bells-2.wav',
+  'sounds/santa/santa-brian-1.wav',
+  'sounds/santa/santa-merry-3.wav',
+  'sounds/santa/santa-hearty-3.wav',
+  'sounds/santa/santa-belly-3.wav',
+  'sounds/santa/santa-bells-3.wav',
+  'sounds/santa/santa-bill-2.wav',
+  'sounds/santa/santa-brian-2.wav',
 ] as const
-export const ENTER_CLIPS = [
-  ...SANTA_CLIPS,
-  'sounds/sleigh.wav',
-  'sounds/chime.wav',
-  'sounds/ding-dong.wav',
-  'sounds/new-year.wav',
-] as const
+
+export const SLEIGH_CLIPS = ['sounds/sleigh-1.wav', 'sounds/sleigh-2.wav', 'sounds/sleigh-3.wav'] as const
+
+/**
+ * What Enter plays, by kind, and how often: in each round of seven, Santa
+ * laughs three times and the others come once each.
+ */
+const ENTER_KINDS: Record<string, readonly string[]> = {
+  santa: SANTA_CLIPS,
+  sleigh: SLEIGH_CLIPS,
+  chime: ['sounds/chime.wav'],
+  'ding-dong': ['sounds/ding-dong.wav'],
+  'new-year': ['sounds/new-year.wav'],
+}
+const ENTER_ROUND = ['santa', 'santa', 'santa', 'sleigh', 'chime', 'ding-dong', 'new-year'] as const
+
+/** Every sound Enter can play. */
+export const ENTER_CLIPS: readonly string[] = Object.values(ENTER_KINDS).flat()
 
 /** Fewest milliseconds between two keystroke sounds, so fast typing or a held key never drones. */
 export const KEYSTROKE_GAP_MS = 70
-
-/** The share of keystrokes that play a glockenspiel note instead of a sleigh bell. */
-const TWINKLE_SHARE = 0.2
 
 /** One edit of the prompt box, as `prompt.edit` carries it. */
 type Edit = { start: number; end: number; inputText: string }
@@ -58,8 +80,7 @@ const randomOf = <T>(list: readonly T[], random: () => number): T =>
 
 /**
  * The clip an edit plays: none for a bare cursor move or within
- * KEYSTROKE_GAP_MS of the last one, else a sleigh bell or, now and then, a
- * note of the pentatonic scale, so fast typing plays a little tune.
+ * KEYSTROKE_GAP_MS of the last one, else one of the sleigh-bell jingles.
  */
 export function keystrokeClip(edit: Edit, msSinceLast: number, random: () => number = Math.random): string | undefined {
   const isChange = edit.inputText !== '' || edit.end > edit.start
@@ -68,7 +89,7 @@ export function keystrokeClip(edit: Edit, msSinceLast: number, random: () => num
     return undefined
   }
 
-  return randomOf(random() < TWINKLE_SHARE ? TWINKLE_CLIPS : JINGLE_CLIPS, random)
+  return randomOf(JINGLE_CLIPS, random)
 }
 
 /** The list in a new order, every item once. */
@@ -104,4 +125,15 @@ export function createDeck(clips: readonly string[], random: () => number = Math
 
     return last
   }
+}
+
+/**
+ * Deals Enter's sounds: a kind from ENTER_ROUND's deck, then that kind's next
+ * clip from its own, so every Santa laugh plays before one comes again.
+ */
+export function createEnterDeck(random: () => number = Math.random): () => string {
+  const nextKind = createDeck(ENTER_ROUND, random)
+  const decks = new Map(Object.entries(ENTER_KINDS).map(([kind, clips]) => [kind, createDeck(clips, random)]))
+
+  return () => decks.get(nextKind())?.() ?? (SANTA_CLIPS[0] as string)
 }

@@ -7,7 +7,7 @@ import type { BellSpot, Cell } from './frame'
 import { labelLeft, notesAt, RING_GLOW } from './ring'
 import { isUnderSnow } from './selection'
 import { FLAKES, snowAt } from './snow'
-import { createDeck, ENTER_CLIPS, keystrokeClip, SANTA_CLIPS, shuffled, SONGS } from './sounds'
+import { createEnterDeck, keystrokeClip, SANTA_CLIPS, shuffled, SONGS } from './sounds'
 import type { Song } from './sounds'
 
 const isEnabled = atom({ plugin: 'christmas', key: 'isEnabled' } as const, true)
@@ -146,8 +146,8 @@ let selection: { text: string | undefined; quietTicks: number } = { text: undefi
 /** When the last keystroke sound played, in the clock's milliseconds. */
 let lastKeystrokeAt = Number.NEGATIVE_INFINITY
 
-/** Deals the next Enter chime, and stops the one still playing when it does. */
-const nextEnterClip = createDeck(ENTER_CLIPS)
+/** Deals the next Enter sound, and stops the one still playing when it does. */
+const nextEnterClip = createEnterDeck()
 let enterClip: AbortController | undefined
 
 /** The bell ringing now and what stops its carol; each ring is its own object. */
@@ -439,7 +439,7 @@ function play($: EngineInterface, asset: string, signal?: AbortSignal): void {
   $.audio.play({ asset }, signal === undefined ? undefined : { signal }).catch(() => undefined)
 }
 
-/** A sleigh bell or a glockenspiel note for an edit the person typed. */
+/** A sleigh-bell jingle for an edit the person typed. */
 async function soundKeystroke($: EngineInterface, edit: { start: number; end: number; inputText: string }): Promise<void> {
   if (!(await isSounding($))) {
     return
