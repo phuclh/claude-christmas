@@ -2,6 +2,10 @@
 
 A Christmas theme for the Claude Code terminal.
 
+<p align="center">
+  <img src="assets/demo.svg" alt="Claude Code with the Christmas theme: snow falls over the conversation, the pointer rests on a bell in the garland above the prompt and it rings Jingle Bells, lights chase along the garland and a reindeer sleigh glides along the snowbank below" width="100%">
+</p>
+
 - **A garland around the prompt.** A pine garland runs along the top of the prompt, strung with chasing coloured lights and hung with bells, bows and stars. Below it lies a snowbank where trees glow gold, presents sit, frost glints and, every so often, a reindeer sleigh 🦌🦌🛷 glides by. Every session gets its own random layout.
 - **Bells that ring carols.** Move the mouse onto a 🔔 on the garland and it rings a carol: Jingle Bells, We Wish You a Merry Christmas, Deck the Halls, Carol of the Bells, Silent Night, Joy to the World, O Christmas Tree or Hark! The Herald Angels Sing. Each bell has its own carol. While it rings, the bell flashes, notes float up from it and the carol's name shows beside it. Hover another bell to switch carols; click the ringing bell to hush it.
 - **Snow over the conversation.** Flakes fall through your chat, swaying as they go. The snow stops while you select text, so it never ends up in what you copy.
@@ -47,6 +51,13 @@ If you also have the [Halloween theme](https://github.com/phuclh/claude-hallowee
 claude --plugin-dir ./plugins/christmas       # run it from this folder
 claude plugin validate ./plugins/christmas    # check the manifest and hooks
 claude plugin test ./plugins/christmas        # run the tests
+```
+
+The demo above is drawn by the plugin's own frame, snow and bell code. To render it again after a change:
+
+```sh
+npx -p typescript tsc -p scripts
+node .demo-build/scripts/render-demo.js > assets/demo.svg
 ```
 
 Every sound is synthesized by `scripts/render-sounds.mjs`: the carols on a glockenspiel (inharmonic bar modes) over a soft bass and chords, the church bells by FM, the sleigh bells from bursts of high partials, and Santa's laugh from a small formant synthesizer. Nothing is recorded or sampled, and the carols are traditional tunes in the public domain. To render them again into `plugins/christmas/sounds/`:
