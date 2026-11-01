@@ -142,18 +142,23 @@ test('the draft wraps by word, as the composer does', async () => {
   expect(rowsOfDraft('', 100)).toBe(1)
 })
 
-test('the frame hangs from a box wide enough for the footer separator', async ($, on) => {
-  sessionBeneath(on)
+test('the frame hangs from the footer labels the engine draws, a blank before them for the separator', async ($, on) => {
+  mock.clock(on)
+  mock.store(on, {})
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('command.register', ($, e) => ({ value: { command: e.name } }))
+  on('ui.render', { component: 'SessionMode' }, () => ({ type: 'engine', ref: 0 }))
   await $.session.start(TERMINAL_SESSION)
 
   const labels = await $.ui.mount(MODE_LABELS)
-  const site = await labels.find({ type: 'Box' })
+  const boxes = await labels.findAll({ type: 'Box' })
   const label = widthOf('🎄 holly jolly')
-  expect(site?.props.width).toBe(label + 3)
-  expect(site?.props.alignItems).toBe('flex-end')
+  expect(boxes[0]?.props.flexDirection).toBe('row')
+  expect(boxes[1]?.props.width).toBe(3)
 
-  const rules = (await labels.findAll({ type: 'Box' })).filter(box => box.props.width === FULLSCREEN.columns)
+  const rules = boxes.filter(box => box.props.width === FULLSCREEN.columns)
   expect(rules.map(rule => rule.props.left)).toEqual([-(FULLSCREEN.columns - 2 - label - 3), -(FULLSCREEN.columns - 2 - label - 3)])
+  expect(await labels.findAll({ type: 'Client' })).not.toHaveLength(0)
   await labels.unmount()
 })
 

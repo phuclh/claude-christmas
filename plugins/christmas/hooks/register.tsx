@@ -62,8 +62,10 @@ const MODES_RIGHT_MARGIN = 2
 /**
  * The cells of the ` · ` the terminal puts before the mode labels when other
  * footer items show (debug, IDE or cloud status), which the hook is not told.
- * The labels are drawn right-aligned in a box this much wider than they are,
- * so the box's left edge, which the frame is placed from, is the same either way.
+ * A blank this wide goes before the labels, so the site's left edge, which the
+ * frame is placed from, is the same either way. It is a sibling of the labels,
+ * not a box sized around them: the engine refuses its own drawing under a Box
+ * with a size, a place, `display` or `overflow`.
  */
 const SEPARATOR_CELLS = 3
 const BOTTOM_RULE_ROW = -1
@@ -845,7 +847,8 @@ export const register: Register = on => {
     const bells = await drawBells($, elements, garland.bells, { topRuleRow, siteLeft, columns, tick })
 
     return (
-      <Box flexDirection="column" width={siteWidth} alignItems="flex-end">
+      <Box flexDirection="row">
+        <Box width={SEPARATOR_CELLS} />
         {labels}
         <Box position="absolute" top={topRuleRow} left={-siteLeft} width={columns}>
           {drawCells(Text, garland.cells)}
