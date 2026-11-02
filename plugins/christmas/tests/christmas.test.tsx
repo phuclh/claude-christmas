@@ -9,10 +9,13 @@ import {
   createDeck,
   createEnterDeck,
   ENTER_CLIPS,
-  JINGLE_CLIPS,
+  CRACKLE_CLIPS,
+  createTypingSounds,
   KEYSTROKE_GAP_MS,
-  keystrokeClip,
+  noteClip,
   SANTA_CLIPS,
+  SNOW_CLIPS,
+  TYPING_CAROLS,
   SONGS,
 } from '../hooks/sounds'
 
@@ -218,19 +221,87 @@ test('a selection with snow over it reads as the same selection', async () => {
   expect(isUnderSnow('hello world', 'goodbye ❆', FLAKES)).toBe(false)
 })
 
-test('typing jingles one of many sleigh bells, never faster than the gap', async () => {
-  const edit = { start: 0, end: 0, inputText: 'a' }
-  expect(keystrokeClip(edit, KEYSTROKE_GAP_MS - 1)).toBeUndefined()
-  expect(keystrokeClip({ start: 3, end: 3, inputText: '' }, 1_000)).toBeUndefined()
-  expect(JINGLE_CLIPS).toContain(keystrokeClip(edit, 1_000))
+const LETTER = { start: 0, end: 0, inputText: 'a' } as const
+const SPACE = { start: 0, end: 0, inputText: ' ' } as const
+const BACKSPACE = { start: 2, end: 3, inputText: '' } as const
 
-  const random = seededRandom(3)
-  const heard = new Set(Array.from({ length: 300 }, () => keystrokeClip(edit, 1_000, random)))
-  expect(heard.size).toBeGreaterThan(40)
+/** What a typing clip is: a note on an instrument, a crackle or a step. */
+const kindOf = (clip: string | undefined): string =>
+  clip === undefined ? 'silence' : clip.includes('/notes/box/') ? 'box' : clip.includes('/notes/celesta/') ? 'celesta' : clip.includes('/crackle-') ? 'fire' : 'snow'
 
-  const deal = createDeck(ENTER_CLIPS, seededRandom(5))
-  const round = Array.from({ length: ENTER_CLIPS.length }, () => deal())
-  expect([...round].sort()).toEqual([...ENTER_CLIPS].sort())
+test('layered typing crackles at each key and plays the carols a note at each space', async () => {
+  const typing = createTypingSounds(seededRandom(3))
+  expect(typing.clipFor('layered', LETTER, KEYSTROKE_GAP_MS - 1)).toBeUndefined()
+  expect(typing.clipFor('layered', { start: 3, end: 3, inputText: '' }, 1_000)).toBeUndefined()
+  expect(CRACKLE_CLIPS).toContain(typing.clipFor('layered', LETTER, 1_000))
+  expect(CRACKLE_CLIPS).toContain(typing.clipFor('layered', BACKSPACE, 1_000))
+
+  const [first, second] = TYPING_CAROLS
+  const jingleBells = (first?.notes ?? []).map(() => typing.clipFor('layered', SPACE, 0))
+  expect(jingleBells).toEqual((first?.notes ?? []).map(note => noteClip('box', note)))
+  expect(typing.clipFor('layered', { ...SPACE, inputText: '\n' }, 0)).toBe(noteClip('box', second?.notes[0] ?? ''))
+
+  const heard = new Set(Array.from({ length: 300 }, () => typing.clipFor('layered', LETTER, 1_000)))
+  expect(heard.size).toBeGreaterThan(20)
+})
+
+test('shuffled typing gives each prompt one sound, a different one each prompt', async () => {
+  const typing = createTypingSounds(seededRandom(5))
+  const scenes: string[] = []
+
+  for (let prompt = 0; prompt < 12; prompt++) {
+    const kinds = new Set(Array.from({ length: 10 }, () => kindOf(typing.clipFor('shuffle', LETTER, 1_000))))
+    expect(kinds.size).toBe(1)
+    const [scene = ''] = kinds
+    scenes.push(scene)
+
+    if (scene === 'box' || scene === 'celesta') {
+      expect(typing.clipFor('shuffle', BACKSPACE, 1_000)).toBeUndefined()
+    }
+
+    typing.newPrompt()
+  }
+
+  expect(new Set(scenes)).toEqual(new Set(['box', 'celesta', 'fire', 'snow']))
+  expect(scenes.some((scene, index) => scene === scenes[index - 1])).toBe(false)
+})
+
+test('mixed typing plays carol notes, crackles and steps, and a deletion never a note', async () => {
+  const typing = createTypingSounds(seededRandom(7))
+  const kinds = Array.from({ length: 400 }, () => kindOf(typing.clipFor('mix', LETTER, 1_000)))
+  const notes = kinds.filter(kind => kind === 'box').length
+  expect(new Set(kinds)).toEqual(new Set(['box', 'fire', 'snow']))
+  expect(notes).toBeGreaterThan(150)
+  expect(notes).toBeLessThan(250)
+
+  const deletions = new Set(Array.from({ length: 100 }, () => kindOf(typing.clipFor('mix', BACKSPACE, 1_000))))
+  expect(deletions).toEqual(new Set(['fire', 'snow']))
+  expect(SNOW_CLIPS).toHaveLength(28)
+})
+
+test('/christmas typing lists the styles, picks one, and a new session keeps it', async ($, on) => {
+  sessionBeneath(on, { typing: 'mix' })
+  await $.session.start(TERMINAL_SESSION)
+
+  const listed = await $.command.run({ ...CHRISTMAS_COMMAND, args: 'typing' })
+  expect(listed.text).toMatch(/^Typing sounds: mix\./)
+  expect(listed.text).toMatch(/● mix: /)
+  expect(listed.text).toMatch(/○ layered: /)
+
+  const picked = await $.command.run({ ...CHRISTMAS_COMMAND, args: 'typing Shuffle' })
+  expect(picked.text).toMatch(/Typing sounds: shuffle, each prompt gets one sound/)
+  expect(picked.text).toMatch(/\/christmas sounds to hear it/)
+
+  const wrong = await $.command.run({ ...CHRISTMAS_COMMAND, args: 'typing loud' })
+  expect(wrong.text).toMatch(/^No typing style "loud"/)
+  expect((await $.command.run({ ...CHRISTMAS_COMMAND, args: 'typing' })).text).toMatch(/^Typing sounds: shuffle\./)
+})
+
+test('a new session without a saved style types layered', async ($, on) => {
+  sessionBeneath(on, { typing: 'nonsense' })
+  await $.session.start(TERMINAL_SESSION)
+
+  expect((await $.command.run({ ...CHRISTMAS_COMMAND, args: 'typing' })).text).toMatch(/^Typing sounds: layered\./)
 })
 
 test('hovering a bell rings a carol; another bell takes over; a click hushes it', async ($, on) => {

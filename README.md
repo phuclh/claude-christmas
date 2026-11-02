@@ -10,7 +10,7 @@ A Christmas theme for the Claude Code terminal.
 - **Bells that ring carols.** Move the mouse onto a 🔔 on the garland and it rings a carol: Jingle Bells, We Wish You a Merry Christmas, Deck the Halls, Carol of the Bells, Silent Night, Joy to the World, O Christmas Tree or Hark! The Herald Angels Sing. Each bell has its own carol. While it rings, the bell flashes, notes float up from it and the carol's name shows beside it. Hover another bell to switch carols; click the ringing bell to hush it.
 - **Snow over the conversation.** Flakes fall through your chat, swaying as they go. The snow stops while you select text, so it never ends up in what you copy.
 - **Festive words.** The spinner says things like *Decking the halls…*, *Roasting chestnuts…* or *Checking it twice…*, and finished turns read *Wrapped for 12s*.
-- **Santa, if you like.** With sounds on, each keystroke jingles a little sleigh bell, picked from 52 so it rarely repeats. Enter answers with Santa's *Ho! ho! ho!* (sixteen of them, some with a *Merry Christmas!*), a shake of sleigh bells, church bells, a chime or *"and a happy New Year!"*. Santa comes most often, every laugh in turn, and the same sound never plays twice in a row. Sounds are off until you turn them on.
+- **Santa, if you like.** With sounds on, typing plays by the fire: soft crackles as you type, and at each space the next note of a carol on a music box, so your words spell out Jingle Bells, We Wish You a Merry Christmas, Deck the Halls, Joy to the World and Silent Night. Two other styles shuffle the fireplace, steps in the snow and carols on a music box or celesta. Enter answers with Santa's *Ho! ho! ho!* (sixteen of them, some with a *Merry Christmas!*), a shake of sleigh bells, church bells, a chime or *"and a happy New Year!"*. Santa comes most often, every laugh in turn, and the same sound never plays twice in a row. Sounds are off until you turn them on.
 
 ## Install
 
@@ -35,6 +35,10 @@ In the desktop app, where `/plugin` does not run: click + next to the prompt box
 - `/christmas` turns the theme off and on. Your choice is remembered across sessions.
 - `/christmas bells` mutes and unmutes the carols. Muted, a bell you hover still flashes and shows its carol's name.
 - `/christmas sounds` turns the typing and Enter sounds on and off, and is remembered too.
+- `/christmas typing` picks how typing sounds, and remembers it:
+  - `layered` (the default): crackles of a fire as you type, and the next note of a carol on a music box at each space.
+  - `shuffle`: each prompt gets one sound for all its keys, a different one each time: a carol on a music box or a celesta, the fireplace or the snow.
+  - `mix`: every key picks the next note of a carol, a crackle or a step in the snow.
 - Sounds play on macOS only: Claude Code plays them with `afplay`, and plays nothing on Linux or Windows.
 - After 90 seconds with no typing, no work from Claude and no carol ringing, the animation pauses and stops using CPU. It wakes as soon as you type, Claude starts working or you hover a bell.
 
@@ -60,7 +64,7 @@ npx -p typescript tsc -p scripts
 node .demo-build/scripts/render-demo.js > assets/demo.svg
 ```
 
-The typing jingles, Santa's laughs and the sleigh-bell shakes were made with [ElevenLabs](https://elevenlabs.io) (sound effects, and text to speech for four of the laughs), then cut and levelled. The carols and the other Enter sounds are synthesized by `scripts/render-sounds.mjs`: the carols on a glockenspiel (inharmonic bar modes) over a soft bass and chords, and the church bells by FM. Nothing in it is recorded or sampled, and the carols are traditional tunes in the public domain. To render them again into `plugins/christmas/sounds/`:
+The typing sounds (fire crackles, steps in the snow, and music-box and celesta notes, each retuned from a few generated notes), Santa's laughs and the sleigh-bell shakes were made with [ElevenLabs](https://elevenlabs.io) (sound effects, and text to speech for four of the laughs), then cut and levelled. The carols the bells ring and the other Enter sounds are synthesized by `scripts/render-sounds.mjs`: the carols on a glockenspiel (inharmonic bar modes) over a soft bass and chords, and the church bells by FM. Nothing in it is recorded or sampled, and the carols are traditional tunes in the public domain. To render them again into `plugins/christmas/sounds/`:
 
 ```sh
 node scripts/render-sounds.mjs

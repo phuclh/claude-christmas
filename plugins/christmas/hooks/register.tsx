@@ -7,7 +7,8 @@ import type { BellSpot, Cell } from './frame'
 import { labelLeft, notesAt, RING_GLOW } from './ring'
 import { isUnderSnow } from './selection'
 import { FLAKES, snowAt } from './snow'
-import { createEnterDeck, keystrokeClip, SANTA_CLIPS, shuffled, SONGS } from './sounds'
+import { createEnterDeck, createTypingSounds, isTypingStyle, SANTA_CLIPS, shuffled, SONGS, TYPING_STYLES } from './sounds'
+import type { TypingStyle } from './sounds'
 import type { Song } from './sounds'
 
 const isEnabled = atom({ plugin: 'christmas', key: 'isEnabled' } as const, true)
@@ -24,8 +25,10 @@ const ringStartTick = atom({ plugin: 'christmas', key: 'ringStartTick' } as cons
 const STORE_KEY = 'isEnabled'
 const SOUNDS_STORE_KEY = 'hasSounds'
 const BELLS_STORE_KEY = 'hasBells'
+const TYPING_STORE_KEY = 'typing'
 const SOUNDS_ARGUMENT = 'sounds'
 const BELLS_ARGUMENT = 'bells'
+const TYPING_ARGUMENT = 'typing'
 
 /**
  * One clock drives everything: the snow moves every tick, the frame every
@@ -148,6 +151,10 @@ let lastKeystrokeAt = Number.NEGATIVE_INFINITY
 
 /** Deals the next Enter sound, and stops the one still playing when it does. */
 const nextEnterClip = createEnterDeck()
+
+/** Picks what typing plays, in the style `/christmas typing` chose; the carols keep their place all session. */
+const typing = createTypingSounds()
+let typingStyle: TypingStyle = 'layered'
 let enterClip: AbortController | undefined
 
 /** The bell ringing now and what stops its carol; each ring is its own object. */
@@ -446,7 +453,7 @@ async function soundKeystroke($: EngineInterface, edit: { start: number; end: nu
   }
 
   const now = await $.clock.now()
-  const clip = keystrokeClip(edit, now - lastKeystrokeAt)
+  const clip = typing.clipFor(typingStyle, edit, now - lastKeystrokeAt)
 
   if (clip !== undefined) {
     lastKeystrokeAt = now
@@ -606,8 +613,30 @@ async function toggleSounds($: EngineInterface): Promise<{ text: string }> {
   soundEnter($, SANTA_CLIPS[0])
 
   return {
-    text: `🎅 Sounds on${isThemeComingBack ? ', and the Christmas theme with them' : ''}. Keys jingle like sleigh bells, and Enter gets a "Ho! ho! ho!" from Santa, sleigh bells or a chime. Sounds play on macOS.`,
+    text: `🎅 Sounds on${isThemeComingBack ? ', and the Christmas theme with them' : ''}. Typing crackles like a fire and plays a carol on a music box (/christmas typing for other styles), and Enter gets a "Ho! ho! ho!" from Santa, sleigh bells or church bells. Sounds play on macOS.`,
   }
+}
+
+/** Lists the typing styles with the one in use, or picks one and remembers it. */
+async function chooseTyping($: EngineInterface, name: string): Promise<{ text: string }> {
+  const styles = (Object.entries(TYPING_STYLES) as [TypingStyle, string][])
+    .map(([style, about]) => `${style === typingStyle ? '●' : '○'} ${style}: ${about}`)
+    .join('\n')
+
+  if (name === '') {
+    return { text: `Typing sounds: ${typingStyle}.\n${styles}\nPick one with /christmas typing <style>.` }
+  }
+
+  if (!isTypingStyle(name)) {
+    return { text: `No typing style "${name}". Pick one with /christmas typing <style>:\n${styles}` }
+  }
+
+  typingStyle = name
+  typing.newPrompt()
+  await $.store.set(TYPING_STORE_KEY, name)
+  const hint = (await isSounding($)) ? '' : ' Run /christmas sounds to hear it.'
+
+  return { text: `⌨️ Typing sounds: ${name}, ${TYPING_STYLES[name]}.${hint}` }
 }
 
 async function toggleBells($: EngineInterface): Promise<{ text: string }> {
@@ -646,8 +675,8 @@ export const register: Register = on => {
     await $.command.register({
       name: 'christmas',
       description:
-        'Toggle the Christmas theme (garland, bells and snow around the prompt); "bells" mutes the carols, "sounds" toggles typing and Enter sounds',
-      argumentHint: '[bells|sounds]',
+        'Toggle the Christmas theme (garland, bells and snow around the prompt); "bells" mutes the carols, "sounds" toggles typing and Enter sounds, "typing" picks how typing sounds',
+      argumentHint: '[bells|sounds|typing [layered|shuffle|mix]]',
     })
 
     if ((await $.store.get(STORE_KEY)) === false) {
@@ -661,6 +690,9 @@ export const register: Register = on => {
     if ((await $.store.get(BELLS_STORE_KEY)) === false) {
       await update($, hasBells, () => false)
     }
+
+    const storedTyping = await $.store.get(TYPING_STORE_KEY)
+    typingStyle = typeof storedTyping === 'string' && isTypingStyle(storedTyping) ? storedTyping : 'layered'
 
     await update($, ringingBell, () => -1)
     await wake($)
@@ -679,9 +711,13 @@ export const register: Register = on => {
       return toggleBells($)
     }
 
+    if (option === TYPING_ARGUMENT || option.startsWith(`${TYPING_ARGUMENT} `)) {
+      return chooseTyping($, option.slice(TYPING_ARGUMENT.length).trim())
+    }
+
     if (option !== '') {
       return {
-        text: `No option "${e.args.trim()}": run /christmas to turn the theme on or off, /christmas bells to mute the carols, or /christmas sounds for typing and Enter sounds.`,
+        text: `No option "${e.args.trim()}": run /christmas to turn the theme on or off, /christmas bells to mute the carols, /christmas sounds for typing and Enter sounds, or /christmas typing to pick how typing sounds.`,
       }
     }
 
@@ -745,8 +781,12 @@ export const register: Register = on => {
     draftText = ''
     await fitDraft($)
 
-    if (e.origin.kind === 'composer' && (await isSounding($))) {
-      soundEnter($)
+    if (e.origin.kind === 'composer') {
+      typing.newPrompt()
+
+      if (await isSounding($)) {
+        soundEnter($)
+      }
     }
 
     return next(e)
