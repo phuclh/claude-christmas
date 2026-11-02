@@ -9,7 +9,7 @@
       "name": "christmas",
       "source": "./plugins/christmas",
       "description": "Christmas theme for Claude Code: a garland of bells, bows and twinkling lights around the prompt (hover a bell to hear a carol), snow falling over the conversation, festive spinner words, and optional Santa and sleigh-bell sounds",
-      "version": "0.1.3",
+      "version": "0.1.4",
       "author": { "name": "LE PHUC H" },
       "category": "fun"
     }

@@ -470,7 +470,7 @@ test('Enter laughs like Santa most, every laugh in turn, and every other sound c
 })
 
 test('with sounds on, Enter plays a sound, but not over a carol', async ($, on) => {
-  sessionBeneath(on, { hasSounds: true })
+  const { clock } = sessionBeneath(on, { hasSounds: true })
   const played = recordPlays(on)
   await $.session.start(TERMINAL_SESSION)
 
@@ -482,7 +482,35 @@ test('with sounds on, Enter plays a sound, but not over a carol', async ($, on) 
   await labels.pointer({ type: 'enter', x: 0, y: 0, in: bell })
   expect(SONG_ASSETS).toContain(played[1])
 
+  await clock.advance(2_000)
   await $.prompt.submit({ text: 'again', wait: false, origin: { kind: 'composer' } })
   expect(played).toHaveLength(2)
   await labels.unmount()
+})
+
+test('a slash command or skill typed gets an Enter sound too, once even if it sends a prompt on', async ($, on) => {
+  const { clock } = sessionBeneath(on, { hasSounds: true })
+  const played = recordPlays(on)
+  on('command.run', () => ({ text: '' }))
+  await $.session.start(TERMINAL_SESSION)
+  const typed = (command: string, args = '') =>
+    $.command.run({ ...CHRISTMAS_COMMAND, command, args, origin: { kind: 'composer' } })
+
+  await typed('commit')
+  expect(played).toHaveLength(1)
+  expect(ENTER_CLIPS).toContain(played[0])
+
+  await $.prompt.submit({ text: 'the skill prompt', wait: false, origin: { kind: 'composer' } })
+  expect(played).toHaveLength(1)
+
+  await clock.advance(2_000)
+  await $.command.run({ ...CHRISTMAS_COMMAND, command: 'compact', origin: { kind: 'plugin', name: 'other' } })
+  expect(played).toHaveLength(1)
+
+  await typed('christmas', 'typing mix')
+  expect(played).toHaveLength(2)
+
+  await clock.advance(2_000)
+  await typed('christmas', 'sounds')
+  expect(played).toHaveLength(2)
 })

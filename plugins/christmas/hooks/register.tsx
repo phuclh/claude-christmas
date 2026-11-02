@@ -152,6 +152,13 @@ let lastKeystrokeAt = Number.NEGATIVE_INFINITY
 /** Deals the next Enter sound, and stops the one still playing when it does. */
 const nextEnterClip = createEnterDeck()
 
+/**
+ * When Enter last counted, so a slash command and the prompt it may send on
+ * make one Enter: one sound, one new typing scene.
+ */
+let lastEnterAt = Number.NEGATIVE_INFINITY
+const ONE_ENTER_MS = 1_000
+
 /** Picks what typing plays, in the style `/christmas typing` chose; the carols keep their place all session. */
 const typing = createTypingSounds()
 let typingStyle: TypingStyle = 'layered'
@@ -462,6 +469,26 @@ async function soundKeystroke($: EngineInterface, edit: { start: number; end: nu
 }
 
 /**
+ * The person pressed Enter on a prompt or a slash command: a new typing scene
+ * and, with sounds on, an Enter sound. Within ONE_ENTER_MS of the last it
+ * counts once.
+ */
+async function enterPressed($: EngineInterface): Promise<void> {
+  const now = await $.clock.now()
+
+  if (now - lastEnterAt < ONE_ENTER_MS) {
+    return
+  }
+
+  lastEnterAt = now
+  typing.newPrompt()
+
+  if (await isSounding($)) {
+    soundEnter($)
+  }
+}
+
+/**
  * The next of Santa's laughs, sleigh bells or chimes in the deck (or the clip
  * given), cutting off the last one; none over a carol.
  */
@@ -700,6 +727,19 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // A slash command or skill the person typed runs as a command, not a prompt:
+  // its Enter sounds here, before `/christmas`'s own hook answers it. `/christmas sounds` answers with its own sound.
+  on('command.run', async ($, e, next) => {
+    const isSoundsToggle = e.command === 'christmas' && e.args.trim().toLowerCase() === SOUNDS_ARGUMENT
+
+    if (e.origin.kind === 'composer' && !isSoundsToggle) {
+      void wake($)
+      await enterPressed($)
+    }
+
+    return next(e)
+  })
+
   on('command.run', { command: 'christmas' }, async ($, e) => {
     const option = e.args.trim().toLowerCase()
 
@@ -782,11 +822,7 @@ export const register: Register = on => {
     await fitDraft($)
 
     if (e.origin.kind === 'composer') {
-      typing.newPrompt()
-
-      if (await isSounding($)) {
-        soundEnter($)
-      }
+      await enterPressed($)
     }
 
     return next(e)
