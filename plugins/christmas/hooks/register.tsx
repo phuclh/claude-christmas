@@ -167,6 +167,9 @@ let enterClip: AbortController | undefined
 /** The bell ringing now and what stops its carol; each ring is its own object. */
 let ringing: { bell: number; stop: AbortController } | undefined
 
+/** The bell the pointer is on, as the bells last said: a carol plays only while the pointer stays on its bell. */
+let pointedBell: number | undefined
+
 function hashOf(text: string): number {
   let hash = 0
 
@@ -509,17 +512,22 @@ async function endRing($: EngineInterface, ring: NonNullable<typeof ringing>): P
   }
 
   ringing = undefined
-  await update($, ringingBell, () => -1)
+  await showRinging($)
+}
+
+/** Draws the bell that rings now; every change of `ringing` ends with this, so the last write is always the truth. */
+async function showRinging($: EngineInterface): Promise<void> {
+  await update($, ringingBell, () => ringing?.bell ?? -1)
 }
 
 /**
  * Rings bell `bell`: its carol plays, cutting off another bell's, while the
- * bell flashes and notes rise from it under the carol's name. The bell already
- * ringing does not start over. With bells muted it flashes and names its carol
- * without a sound.
+ * bell flashes and notes rise from it under the carol's name, until the
+ * carol ends or the pointer leaves the bell. The bell already ringing does not
+ * start over. With bells muted it flashes and names its carol without a sound.
  */
 async function ring($: EngineInterface, bell: number): Promise<void> {
-  if (!(await read($, isEnabled)) || ringing?.bell === bell) {
+  if (!(await read($, isEnabled)) || ringing?.bell === bell || pointedBell !== bell) {
     return
   }
 
@@ -529,12 +537,12 @@ async function ring($: EngineInterface, bell: number): Promise<void> {
   ringing = current
   const startTick = await read($, frameTick)
   await update($, ringStartTick, () => startTick)
-  await update($, ringingBell, () => bell)
+  await showRinging($)
   void wake($)
 
   const startedAt = await $.clock.now()
 
-  if (await read($, hasBells)) {
+  if ((await read($, hasBells)) && !current.stop.signal.aborted) {
     await $.audio.play({ asset: songFor(bell).asset }, { signal: current.stop.signal }).catch(() => undefined)
   }
 
@@ -551,11 +559,11 @@ async function ring($: EngineInterface, bell: number): Promise<void> {
   await endRing($, current)
 }
 
-/** Stops the carol ringing now, if one is. */
-async function hush($: EngineInterface): Promise<void> {
+/** Stops the carol ringing now, if one is (and, given a bell, only that bell's). */
+async function hush($: EngineInterface, bell?: number): Promise<void> {
   const current = ringing
 
-  if (current !== undefined) {
+  if (current !== undefined && (bell === undefined || current.bell === bell)) {
     current.stop.abort()
     await endRing($, current)
   }
@@ -570,8 +578,9 @@ function bellOf(element: string): number | undefined {
 
 /**
  * The garland's bells, each in its own region so the pointer reaching it
- * rings its carol; the ringing one flashes. With a carol ringing and nothing
- * being selected, notes rise from its bell and its name shows beside it.
+ * rings its carol and leaving it stops the carol; the ringing one flashes.
+ * With a carol ringing and nothing being selected, notes rise from its bell
+ * and its name shows beside it.
  */
 async function drawBells(
   $: EngineInterface,
@@ -677,7 +686,7 @@ async function toggleBells($: EngineInterface): Promise<{ text: string }> {
     return { text: 'Bells muted: hovering a bell shows its carol without playing it. Run /christmas bells to unmute.' }
   }
 
-  return { text: '🔔 Bells unmuted. Hover a bell on the garland above the prompt to hear its carol; click it to hush.' }
+  return { text: '🔔 Bells unmuted. Hover a bell on the garland above the prompt to hear its carol; move off it to stop.' }
 }
 
 /** Turns the theme on or off and remembers it; off, the snow stops and any sound stops. */
@@ -782,7 +791,14 @@ export const register: Register = on => {
     }
 
     if ('ring' in data && data.ring === true) {
+      pointedBell = bell
       void ring($, bell)
+    } else if ('leave' in data && data.leave === true) {
+      if (pointedBell === bell) {
+        pointedBell = undefined
+      }
+
+      void hush($, bell)
     } else if ('hush' in data && data.hush === true) {
       void hush($)
     }

@@ -39,8 +39,8 @@ const CHRISTMAS_COMMAND = {
 
 const TERMINAL_SESSION = { cwd: '/tmp', surface: 'terminal', isInteractive: true } as const
 
-/** How long each clip plays beneath the plugin, on the mocked clock. */
-const CLIP_MS = 10_000
+/** The shortest time a bell shows it rings, as the mod keeps it. */
+const MIN_RING_MS = 2_500
 
 const SONG_ASSETS = SONGS.map(song => song.asset)
 
@@ -75,18 +75,37 @@ function sessionBeneath(on: On, stored: Record<string, unknown> = {}) {
   return { clock }
 }
 
-/** Plays clips as the engine beneath would, each for CLIP_MS, keeping the list of what played. */
+/** Plays clips as the engine beneath would, keeping the list of what played; each clip ends at once. */
 function recordPlays(on: On): string[] {
   const played: string[] = []
-  on('audio.play', async ($, e) => {
+  on('audio.play', ($, e) => {
     played.push(e.clip.asset ?? '')
-    await $.clock.sleep(CLIP_MS)
 
     return { value: undefined }
   })
   on('prompt.submit', ($, e) => ({ text: e.text }))
 
   return played
+}
+
+/** Plays each clip until what started it stops it, keeping the lists of what played and what was stopped. */
+function holdPlays(on: On): { played: string[]; stopped: string[] } {
+  const played: string[] = []
+  const stopped: string[] = []
+  on('audio.play', async ($, e, next) => {
+    const asset = e.clip.asset ?? ''
+    played.push(asset)
+    await new Promise<void>(resolve => {
+      next.signal.addEventListener('abort', () => {
+        stopped.push(asset)
+        resolve()
+      })
+    })
+
+    return { value: undefined }
+  })
+
+  return { played, stopped }
 }
 
 test('the garland always hangs bells, each drawn where the layout put it', async () => {
@@ -323,9 +342,8 @@ test('hovering a bell rings a carol; another bell takes over; a click hushes it'
   const title = SONGS.find(song => song.asset === played[0])?.title ?? ''
   expect((await labels.find({ type: 'Text', text: /^♪ / }))?.text).toBe(`♪ ${title} ♪`)
 
-  // Resting, moving or coming back to the same bell does not start it over.
+  // Resting or moving on the same bell does not start it over.
   await labels.pointer({ type: 'move', x: 1, y: 0, in: first })
-  await labels.pointer({ type: 'leave', x: 1, y: 0, in: first })
   await labels.pointer({ type: 'enter', x: 0, y: 0, in: first })
   expect(played).toHaveLength(1)
 
@@ -343,6 +361,40 @@ test('hovering a bell rings a carol; another bell takes over; a click hushes it'
   await labels.unmount()
 })
 
+test('a carol plays only while the pointer stays on its bell', async ($, on) => {
+  sessionBeneath(on)
+  const { played, stopped } = holdPlays(on)
+  await $.session.start(TERMINAL_SESSION)
+
+  const labels = await $.ui.mount(MODE_LABELS)
+  const bells = await labels.findAll({ type: 'Client' })
+  const first = bells[0]?.key ?? ''
+  const second = bells[1]?.key ?? ''
+  const glowing = async () =>
+    (await labels.findAll({ type: 'Client' })).filter(bell => (bell.props.props as { glow: unknown }).glow !== null).map(bell => bell.key)
+
+  await labels.pointer({ type: 'enter', x: 0, y: 0, in: first })
+  await labels.pointer({ type: 'leave', x: 2, y: 0, in: first })
+  expect(stopped).toEqual([played[0]])
+  expect(await labels.find({ type: 'Text', text: /^♪ / })).toBeUndefined()
+  expect(await glowing()).toEqual([])
+
+  // Coming back rings the carol again from the start.
+  await labels.pointer({ type: 'enter', x: 0, y: 0, in: first })
+  expect(played).toEqual([played[0], played[0]])
+
+  // Onto the next bell before the first says the pointer left: the late leave stops nothing.
+  await labels.pointer({ type: 'enter', x: 0, y: 0, in: second })
+  await labels.pointer({ type: 'leave', x: 2, y: 0, in: first })
+  expect(stopped).toEqual([played[0], played[0]])
+  expect(await glowing()).toEqual([second])
+
+  await labels.pointer({ type: 'leave', x: 2, y: 0, in: second })
+  expect(stopped).toEqual([played[0], played[0], played[2]])
+  expect(await glowing()).toEqual([])
+  await labels.unmount()
+})
+
 test('a carol that ends lets its bell rest, and the bell rings again', async ($, on) => {
   const { clock } = sessionBeneath(on)
   const played = recordPlays(on)
@@ -352,7 +404,7 @@ test('a carol that ends lets its bell rest, and the bell rings again', async ($,
   const bell = (await labels.find({ type: 'Client' }))?.key ?? ''
 
   await labels.pointer({ type: 'enter', x: 0, y: 0, in: bell })
-  await clock.advance(CLIP_MS + 100)
+  await clock.advance(MIN_RING_MS + 100)
   expect(await labels.find({ type: 'Text', text: /^♪ / })).toBeUndefined()
 
   await labels.pointer({ type: 'leave', x: 0, y: 0, in: bell })
