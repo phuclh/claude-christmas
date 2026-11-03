@@ -7,8 +7,8 @@ import type { BellSpot, Cell } from './frame'
 import { labelLeft, notesAt, RING_GLOW } from './ring'
 import { isUnderSnow } from './selection'
 import { FLAKES, snowAt } from './snow'
-import { createEnterDeck, createTypingSounds, isTypingStyle, SANTA_CLIPS, shuffled, SONGS, TYPING_STYLES } from './sounds'
-import type { TypingStyle } from './sounds'
+import { createEnterDeck, createTypingSounds, createVoices, isTypingStyle, SANTA_CLIPS, shuffled, SONGS, TYPING_PLAYS, TYPING_STYLES } from './sounds'
+import type { TypingStyle, Voices } from './sounds'
 import type { Song } from './sounds'
 
 const isEnabled = atom({ plugin: 'christmas', key: 'isEnabled' } as const, true)
@@ -162,7 +162,11 @@ const ONE_ENTER_MS = 1_000
 /** Picks what typing plays, in the style `/christmas typing` chose; the carols keep their place all session. */
 const typing = createTypingSounds()
 let typingStyle: TypingStyle = 'layered'
-let enterClip: AbortController | undefined
+
+/** The engine's plays shared out (ENGINE_PLAYS), so fast typing never leaves Enter or a carol without one. */
+const typingVoices = createVoices(TYPING_PLAYS)
+const enterVoices = createVoices(1)
+const carolVoices = createVoices(1)
 
 /** The bell ringing now and what stops its carol; each ring is its own object. */
 let ringing: { bell: number; stop: AbortController } | undefined
@@ -449,11 +453,12 @@ async function isSounding($: EngineInterface): Promise<boolean> {
 }
 
 /**
- * Plays one of the mod's clips without holding up the hook that asked; a
- * terminal with no player plays nothing.
+ * Plays one of the mod's clips on `voices`, within their share of the
+ * engine's plays, until it ends or `stop` stops it; a terminal with no player
+ * plays nothing.
  */
-function play($: EngineInterface, asset: string, signal?: AbortSignal): void {
-  $.audio.play({ asset }, signal === undefined ? undefined : { signal }).catch(() => undefined)
+function play($: EngineInterface, voices: Voices, asset: string, stop?: AbortController): Promise<void> {
+  return voices.play(signal => $.audio.play({ asset }, { signal }), stop)
 }
 
 /** A sleigh-bell jingle for an edit the person typed. */
@@ -467,7 +472,7 @@ async function soundKeystroke($: EngineInterface, edit: { start: number; end: nu
 
   if (clip !== undefined) {
     lastKeystrokeAt = now
-    play($, clip)
+    void play($, typingVoices, clip)
   }
 }
 
@@ -500,9 +505,7 @@ function soundEnter($: EngineInterface, clip?: string): void {
     return
   }
 
-  enterClip?.abort()
-  enterClip = new AbortController()
-  play($, clip ?? nextEnterClip(), enterClip.signal)
+  void play($, enterVoices, clip ?? nextEnterClip())
 }
 
 /** Ends a ring, unless another bell has taken over since it began. */
@@ -532,7 +535,7 @@ async function ring($: EngineInterface, bell: number): Promise<void> {
   }
 
   ringing?.stop.abort()
-  enterClip?.abort()
+  enterVoices.stopAll()
   const current = { bell, stop: new AbortController() }
   ringing = current
   const startTick = await read($, frameTick)
@@ -542,8 +545,8 @@ async function ring($: EngineInterface, bell: number): Promise<void> {
 
   const startedAt = await $.clock.now()
 
-  if ((await read($, hasBells)) && !current.stop.signal.aborted) {
-    await $.audio.play({ asset: songFor(bell).asset }, { signal: current.stop.signal }).catch(() => undefined)
+  if (await read($, hasBells)) {
+    await play($, carolVoices, songFor(bell).asset, current.stop)
   }
 
   const shownMs = (await $.clock.now()) - startedAt
@@ -635,7 +638,8 @@ async function toggleSounds($: EngineInterface): Promise<{ text: string }> {
   await $.store.set(SOUNDS_STORE_KEY, isNowOn)
 
   if (!isNowOn) {
-    enterClip?.abort()
+    enterVoices.stopAll()
+    typingVoices.stopAll()
 
     return { text: 'Sounds off. Run /christmas sounds to bring them back.' }
   }
@@ -700,7 +704,8 @@ async function setTheme($: EngineInterface, isOn: boolean): Promise<void> {
     return
   }
 
-  enterClip?.abort()
+  enterVoices.stopAll()
+  typingVoices.stopAll()
   await hush($)
   await sleep($)
 }

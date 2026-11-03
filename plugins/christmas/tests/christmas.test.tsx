@@ -1,4 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
+import type { Engine, EngineCall } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import { rowsOfDraft, widthOf } from '../hooks/cells'
@@ -11,6 +12,8 @@ import {
   ENTER_CLIPS,
   CRACKLE_CLIPS,
   createTypingSounds,
+  createVoices,
+  ENGINE_PLAYS,
   KEYSTROKE_GAP_MS,
   noteClip,
   SANTA_CLIPS,
@@ -88,12 +91,25 @@ function recordPlays(on: On): string[] {
   return played
 }
 
-/** Plays each clip until what started it stops it, keeping the lists of what played and what was stopped. */
-function holdPlays(on: On): { played: string[]; stopped: string[] } {
+/**
+ * Plays each clip until what started it stops it, keeping the lists of what
+ * played, what was stopped and what was refused: like the engine, it refuses
+ * a play while ENGINE_PLAYS of the plugin's are going.
+ */
+function holdPlays(on: On): { played: string[]; stopped: string[]; refused: string[] } {
   const played: string[] = []
   const stopped: string[] = []
+  const refused: string[] = []
+  let going = 0
   on('audio.play', async ($, e, next) => {
     const asset = e.clip.asset ?? ''
+
+    if (going >= ENGINE_PLAYS) {
+      refused.push(asset)
+      throw new Error(`refused: ${ENGINE_PLAYS} plays are going at once`)
+    }
+
+    going++
     played.push(asset)
     await new Promise<void>(resolve => {
       next.signal.addEventListener('abort', () => {
@@ -101,11 +117,25 @@ function holdPlays(on: On): { played: string[]; stopped: string[] } {
         resolve()
       })
     })
+    going--
 
     return { value: undefined }
   })
 
-  return { played, stopped }
+  return { played, stopped, refused }
+}
+
+/**
+ * Raises `prompt.edit` as the editor does for a key the person types. Only
+ * the editor raises it, so the kit's `$` types leave it out; the kit runs it.
+ */
+const promptEdit = ($: Engine): EngineCall<'prompt.edit'> => ($.prompt as unknown as { edit: EngineCall<'prompt.edit'> }).edit
+
+/** Lets every promise that is ready run on. */
+async function settle(): Promise<void> {
+  for (let round = 0; round < 20; round++) {
+    await Promise.resolve()
+  }
 }
 
 test('the garland always hangs bells, each drawn where the layout put it', async () => {
@@ -358,6 +388,82 @@ test('hovering a bell rings a carol; another bell takes over; a click hushes it'
 
   await labels.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: second })
   expect(await labels.find({ type: 'Text', text: /^♪ / })).toBeUndefined()
+  await labels.unmount()
+})
+
+test('voices play at most so many clips at once, stopping the oldest, and the newest waiting one starts', async () => {
+  const voices = createVoices(2)
+  const started: string[] = []
+  const stopped: string[] = []
+  const clip = (name: string) => (signal: AbortSignal) =>
+    new Promise<void>(resolve => {
+      started.push(name)
+      signal.addEventListener('abort', () => {
+        stopped.push(name)
+        resolve()
+      })
+    })
+
+  void voices.play(clip('a'))
+  void voices.play(clip('b'))
+  await settle()
+  expect(started).toEqual(['a', 'b'])
+
+  // Two more at once: the oldest stops, and only the newer of the two starts.
+  void voices.play(clip('c'))
+  void voices.play(clip('d'))
+  await settle()
+  expect(stopped).toEqual(['a'])
+  expect(started).toEqual(['a', 'b', 'd'])
+
+  // A clip stopped before it starts never starts.
+  const stop = new AbortController()
+  stop.abort()
+  await voices.play(clip('e'), stop)
+  await settle()
+  expect(started).toEqual(['a', 'b', 'd'])
+
+  voices.stopAll()
+  await settle()
+  expect(stopped).toEqual(['a', 'b', 'd'])
+})
+
+test('fast typing never takes the play Enter or a carol needs', async ($, on) => {
+  const { clock } = sessionBeneath(on, { hasSounds: true, typing: 'mix' })
+  const { played, refused } = holdPlays(on)
+  on('prompt.submit', ($, e) => ({ text: e.text }))
+  on('prompt.edit', ($, e) => ({ text: e.text.slice(0, e.start) + e.inputText + e.text.slice(e.end), cursor: e.start + e.inputText.length }))
+  await $.session.start(TERMINAL_SESSION)
+
+  let draft = ''
+  const typeFast = async (text: string) => {
+    for (const character of text) {
+      await promptEdit($)({ origin: { kind: 'composer' }, text: draft, cursor: draft.length, start: draft.length, end: draft.length, inputText: character })
+      draft += character
+      await clock.advance(KEYSTROKE_GAP_MS + 10)
+      await settle()
+    }
+  }
+
+  // Every key past the gap sounds, and each sound rings on, as notes and crackles do under fast typing.
+  await typeFast('merry christmas to all')
+  expect(played.length).toBeGreaterThanOrEqual(10)
+
+  await $.prompt.submit({ text: draft, wait: false, origin: { kind: 'composer' } })
+  await settle()
+  expect(ENTER_CLIPS).toContain(played[played.length - 1])
+
+  await typeFast('and to all a good night')
+  const labels = await $.ui.mount(MODE_LABELS)
+  const bell = (await labels.find({ type: 'Client' }))?.key ?? ''
+  await labels.pointer({ type: 'enter', x: 0, y: 0, in: bell })
+  await settle()
+  expect(SONG_ASSETS).toContain(played[played.length - 1])
+
+  await typeFast('ho ho ho')
+  expect(refused).toEqual([])
+  await labels.pointer({ type: 'leave', x: 2, y: 0, in: bell })
+  await settle()
   await labels.unmount()
 })
 
