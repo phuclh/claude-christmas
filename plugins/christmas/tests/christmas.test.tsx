@@ -208,10 +208,43 @@ test('the frame hangs from the footer labels the engine draws, a blank before th
   expect(boxes[0]?.props.flexDirection).toBe('row')
   expect(boxes[1]?.props.width).toBe(3)
 
+  // The garland and the snowbank from the screen's left edge, and spare garland a frame's width further left.
+  const siteLeft = FULLSCREEN.columns - 2 - label - 3
   const rules = boxes.filter(box => box.props.width === FULLSCREEN.columns)
-  expect(rules.map(rule => rule.props.left)).toEqual([-(FULLSCREEN.columns - 2 - label - 3), -(FULLSCREEN.columns - 2 - label - 3)])
+  expect(rules.map(rule => rule.props.left)).toEqual([-siteLeft, -siteLeft - FULLSCREEN.columns, -siteLeft - FULLSCREEN.columns, -siteLeft])
   expect(await labels.findAll({ type: 'Client' })).not.toHaveLength(0)
   await labels.unmount()
+})
+
+test('beside a docked pane the frame keeps the width of the terminal, which a resize or a typed command tells again', async ($, on) => {
+  mock.clock(on)
+  mock.store(on, {})
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('command.register', ($, e) => ({ value: { command: e.name } }))
+  on('command.run', () => ({ text: '' }))
+  on('ui.render', { component: 'SessionMode' }, () => ({ type: 'engine', ref: 0 }))
+  await $.session.start(TERMINAL_SESSION)
+
+  const label = widthOf('🎄 holly jolly')
+  /** The garland's width and where it starts from the labels, drawn for a footer told `columns` across and `rows` down. */
+  const garlandAt = async (columns: number, rows: number) => {
+    const labels = await $.ui.mount({ ...MODE_LABELS, viewport: { columns, rows, isFullscreen: true } })
+    const garland = (await labels.findAll({ type: 'Box' })).find(box => box.props.position === 'absolute' && typeof box.props.width === 'number')
+    await labels.unmount()
+
+    return { width: garland?.props.width, left: garland?.props.left }
+  }
+
+  expect(await garlandAt(150, 41)).toEqual({ width: 150, left: -(150 - 2 - label - 3) })
+  // A pane docks: the footer is told the transcript's width, and the frame still spans the terminal.
+  expect(await garlandAt(83, 41)).toEqual({ width: 150, left: -(150 - 2 - label - 3) })
+
+  // A new height means the window was resized, so the width told is the terminal's.
+  expect(await garlandAt(90, 40)).toEqual({ width: 90, left: -(90 - 2 - label - 3) })
+
+  // A typed slash command says the terminal's width exactly.
+  await $.command.run({ ...CHRISTMAS_COMMAND, command: 'commit', presentation: { isFullscreen: true, columns: 120 } })
+  expect(await garlandAt(70, 40)).toEqual({ width: 120, left: -(120 - 2 - label - 3) })
 })
 
 test('the lights chase along the garland', async () => {
