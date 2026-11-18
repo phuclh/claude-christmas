@@ -39,7 +39,7 @@ In the desktop app, where `/plugin` does not run: click + next to the prompt box
   - `layered` (the default): crackles of a fire as you type, and the next note of a carol on a music box at each space.
   - `shuffle`: each prompt gets one sound for all its keys, a different one each time: a carol on a music box or a celesta, the fireplace or the snow.
   - `mix`: every key picks the next note of a carol, a crackle or a step in the snow.
-- Sounds play on macOS only: Claude Code plays them with `afplay`, and plays nothing on Linux or Windows.
+- Sounds play on macOS only. The theme plays them all through one small player it starts with macOS's own `osascript`, so your speakers get one steady audio stream instead of a new one for every key (a stream per key made Apple Studio Display speakers buzz until replugged). The player stops after two minutes without a sound and starts again with the next one. Where it cannot run, Claude Code plays the sounds with `afplay`; it plays nothing on Linux or Windows.
 - After 90 seconds with no typing, no work from Claude and no carol ringing, the animation pauses and stops using CPU. It wakes as soon as you type, Claude starts working or you hover a bell.
 
 If you also have the [Halloween theme](https://github.com/phuclh/claude-halloween), run `/halloween` to turn it off first, or the two frames draw over each other.

@@ -4,6 +4,8 @@ import type { On } from 'claude-code'
 
 import { rowsOfDraft, widthOf } from '../hooks/cells'
 import { BELL, bottomRuleCells, createFrameLayout, topRule } from '../hooks/frame'
+import { createPlayer } from '../hooks/player'
+import type { PlayerHost } from '../hooks/player'
 import { isUnderSnow } from '../hooks/selection'
 import { FLAKES, flakeAt, snowAt, snowfallSize } from '../hooks/snow'
 import {
@@ -705,3 +707,134 @@ test('a slash command or skill typed gets an Enter sound too, once even if it se
   await typed('christmas', 'sounds')
   expect(played).toHaveLength(2)
 })
+
+/**
+ * A stand-in for player.js and the engine around it: what the mod starts and
+ * writes, and a hand to answer as the player would, `say`ing its lines and
+ * `leave`ing when done.
+ */
+function standInPlayer(options: { cannotStart?: boolean } = {}) {
+  const started: (readonly string[])[] = []
+  const written: { path: string; text: string }[] = []
+  let say: (text: string) => void = () => undefined
+  let leave: () => void = () => undefined
+  const host: PlayerHost = {
+    root: '/plugin',
+    dataFolder: async () => '/data',
+    spawn: argv => {
+      started.push(argv)
+
+      if (options.cannotStart === true) {
+        return (async function* () {
+          throw new Error('osascript: no such file')
+        })()
+      }
+
+      const lines: string[] = []
+      let wake: () => void = () => undefined
+      let isGone = false
+      say = text => {
+        lines.push(text)
+        wake()
+      }
+      leave = () => {
+        isGone = true
+        wake()
+      }
+
+      return (async function* () {
+        for (;;) {
+          while (lines.length > 0) {
+            yield { stream: 'stdout', text: lines.shift() ?? '' }
+          }
+
+          if (isGone) {
+            return
+          }
+
+          await new Promise<void>(resolve => (wake = resolve))
+        }
+      })()
+    },
+    write: async (path, text) => {
+      written.push({ path, text })
+    },
+    // Never: whether the player says it is ready decides.
+    sleep: () => new Promise<void>(() => undefined),
+  }
+
+  return { host, started, written, say: (text: string) => say(text), leave: () => leave() }
+}
+
+test('every clip plays through the one player the first clip starts', async () => {
+  const player = createPlayer()
+  const { host, started, written, say } = standInPlayer()
+
+  const first = player.play(host, 'sounds/keys/crackle-01.wav')
+  await settle()
+  expect(started).toHaveLength(1)
+  expect(started[0]?.slice(0, 4)).toEqual(['/usr/bin/osascript', '-l', 'JavaScript', '/plugin/player/player.js'])
+  const folder = started[0]?.[4] ?? ''
+  expect(folder).toMatch(/^\/data\/player\/[a-z0-9]+-[a-z0-9]+$/)
+  expect(written).toHaveLength(0)
+
+  // Its answers may come in pieces that cut a line.
+  say('rea')
+  say('dy\n')
+  await settle()
+  const second = player.play(host, 'sounds/santa/santa-merry-1.wav')
+  await settle()
+  expect(written).toEqual([
+    { path: `${folder}/0000000001.req`, text: 'play c1 1 /plugin/sounds/keys/crackle-01.wav\n' },
+    { path: `${folder}/0000000002.req`, text: 'play c2 1 /plugin/sounds/santa/santa-merry-1.wav\n' },
+  ])
+
+  say('done c1\nfailed c2\n')
+  expect(await first).toBe(true)
+  // A clip the player could not play is the caller's to play another way.
+  expect(await second).toBe(false)
+  expect(started).toHaveLength(1)
+})
+
+test('a stopped clip settles at once and the player is asked to stop it', async () => {
+  const player = createPlayer()
+  const { host, written, say } = standInPlayer()
+  const stop = new AbortController()
+
+  const carol = player.play(host, 'sounds/songs/jingle-bells.wav', stop.signal)
+  await settle()
+  say('ready\n')
+  await settle()
+  stop.abort()
+  expect(await carol).toBe(true)
+  await settle()
+  expect(written.map(request => request.text)).toEqual(['play c1 1 /plugin/sounds/songs/jingle-bells.wav\n', 'stop c1\n'])
+})
+
+test('where the player cannot start the caller plays the clip itself, and after two failed starts the player is not tried again', async () => {
+  const player = createPlayer()
+  const { host, started } = standInPlayer({ cannotStart: true })
+
+  expect(await player.play(host, 'sounds/chime.wav')).toBe(false)
+  expect(await player.play(host, 'sounds/chime.wav')).toBe(false)
+  expect(await player.play(host, 'sounds/chime.wav')).toBe(false)
+  expect(started).toHaveLength(2)
+})
+
+test('a player that left is started again for the next clip, and what played ends with it', async () => {
+  const player = createPlayer()
+  const { host, started, say, leave } = standInPlayer()
+
+  const carol = player.play(host, 'sounds/songs/silent-night.wav')
+  await settle()
+  say('ready\n')
+  await settle()
+  say('bye\n')
+  leave()
+  expect(await carol).toBe(true)
+
+  void player.play(host, 'sounds/chime.wav')
+  await settle()
+  expect(started).toHaveLength(2)
+})
+
