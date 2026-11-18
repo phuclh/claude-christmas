@@ -55,6 +55,7 @@ If you also have the [Halloween theme](https://github.com/phuclh/claude-hallowee
 claude --plugin-dir ./plugins/christmas       # run it from this folder
 claude plugin validate ./plugins/christmas    # check the manifest and hooks
 claude plugin test ./plugins/christmas        # run the tests
+node scripts/check-player.mjs                # check the sound player on this Mac, silently
 ```
 
 The demo above is drawn by the plugin's own frame, snow and bell code. To render it again after a change:
